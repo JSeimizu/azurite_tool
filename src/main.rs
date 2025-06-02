@@ -1,9 +1,8 @@
-mod azurite_storage;
-
 #[allow(unused)]
 use {
-    azurite_storage::AzuriteStorage,
+    azuritelib::{azurite_storage::AzuriteStorage, error::AzuriteStorageError},
     clap::Parser,
+    error_stack::{Result, ResultExt},
     jlogger_tracing::{JloggerBuilder, LevelFilter, LogTimeFormat, jdebug, jerror, jinfo},
 };
 
@@ -31,7 +30,7 @@ pub struct Cli {
     verbose: u8,
 }
 
-fn main() {
+fn main() -> Result<(), AzuriteStorageError> {
     let cli = Cli::parse();
 
     let level = match cli.verbose {
@@ -54,15 +53,15 @@ fn main() {
     }
 
     jdebug!(func = "main", line = line!(), note = "start");
-    let azurite_storage = AzuriteStorage::new();
+    let azurite_storage = AzuriteStorage::new(&cli.azurite_url)?;
 
     if let Some(container_name) = cli.create_container {
-        azurite_storage.create_container(&container_name);
+        azurite_storage.create_container(&container_name)?;
         std::process::exit(0);
     }
 
     if let Some(container_name) = cli.delete_container {
-        azurite_storage.delete_container(&container_name);
+        azurite_storage.delete_container(&container_name)?;
         std::process::exit(0);
     }
 
@@ -74,4 +73,6 @@ fn main() {
             jinfo!(No = i + 1, container = container,);
         }
     }
+
+    Ok(())
 }

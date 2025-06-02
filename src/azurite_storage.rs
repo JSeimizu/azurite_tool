@@ -1,9 +1,10 @@
 #[allow(unused)]
 use {
-    super::Cli,
+    super::error::AzuriteStorageError,
     azure_storage::{CloudLocation, StorageCredentials},
     azure_storage_blobs::{prelude::*, service::operations::ListContainersResponse},
     clap::Parser,
+    error_stack::{Context, Report, Result, ResultExt},
     futures::stream::{self, StreamExt},
     jlogger_tracing::{JloggerBuilder, LevelFilter, jdebug, jinfo},
 };
@@ -19,15 +20,16 @@ pub struct AzuriteStorage {
 
 #[allow(unused)]
 impl AzuriteStorage {
-    pub fn new() -> Self {
-        let cli = Cli::parse();
+    pub fn new(azurite_url: &str) -> Result<Self, AzuriteStorageError> {
+        let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+            Report::new(AzuriteStorageError::RuntimeCreationFailed)
+                .attach_printable("Failed to create Tokio runtime")
+                .attach(e)
+        })?;
 
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         let credential = StorageCredentials::access_key(ACCOUNT_NAME, ACCOUNT_KEY);
 
-        let (address, port) = cli
-            .azurite_url
-            .clone()
+        let (address, port) = azurite_url
             .trim_end_matches('/')
             .trim_start_matches("https://")
             .split_once(':')
@@ -37,17 +39,21 @@ impl AzuriteStorage {
                     .unwrap_or_else(|_| panic!("invalid port: {}", port));
                 (address.to_owned(), port)
             })
-            .unwrap();
+            .ok_or_else(|| {
+                Report::new(AzuriteStorageError::InvalidParameter(
+                    azurite_url.to_owned(),
+                ))
+            })?;
 
         let client_builder =
             ClientBuilder::with_location(CloudLocation::Emulator { address, port }, credential);
 
         let blob_service_client = client_builder.blob_service_client();
 
-        AzuriteStorage {
+        Ok(AzuriteStorage {
             runtime,
             blob_service_client,
-        }
+        })
     }
 
     pub fn list_containers(&self) -> Vec<String> {
@@ -70,34 +76,50 @@ impl AzuriteStorage {
         })
     }
 
-    pub fn create_container(&self, container_name: &str) {
+    pub fn create_container(&self, container_name: &str) -> Result<(), AzuriteStorageError> {
         self.runtime.block_on(async {
             self.blob_service_client
                 .container_client(container_name)
                 .create()
                 .await
-                .unwrap();
-        });
+                .map_err(|e| {
+                    Report::new(AzuriteStorageError::InternalError(format!(
+                        "Failed to create container '{}': {}",
+                        container_name, e
+                    )))
+                })
+        })
     }
 
-    pub fn delete_container(&self, container_name: &str) {
+    pub fn delete_container(&self, container_name: &str) -> Result<(), AzuriteStorageError> {
         self.runtime.block_on(async {
             self.blob_service_client
                 .container_client(container_name)
                 .delete()
                 .await
-                .unwrap();
-        });
+                .map_err(|e| {
+                    Report::new(AzuriteStorageError::InternalError(format!(
+                        "Failed to delete container '{}': {}",
+                        container_name, e
+                    )))
+                })
+        })
     }
 
-    pub fn container_url(&self, container_name: &str) -> String {
+    pub fn container_url(&self, container_name: &str) -> Result<String, AzuriteStorageError> {
         self.runtime.block_on(async {
-            self.blob_service_client
+            Ok(self
+                .blob_service_client
                 .container_client(container_name)
                 .url()
-                .unwrap()
+                .map_err(|e| {
+                    Report::new(AzuriteStorageError::InternalError(format!(
+                        "Failed to get URL for container '{}': {}",
+                        container_name, e
+                    )))
+                })?
                 .path()
-                .to_owned()
+                .to_owned())
         })
     }
 }

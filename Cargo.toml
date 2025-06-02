@@ -3,11 +3,18 @@ name = "azurite_tool"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "azuritelib"
+
+[[bin]]
+name = "azurite_tool"
+
 [dependencies]
 azure_core = { version = "0.24.0", features = ["reqwest", "tokio"] }
 azure_storage = "0.21.0"
 azure_storage_blobs = "0.21.0"
 clap = { version = "4.5.39", features = ["derive"] }
+error-stack = "0.5.0"
 futures = "0.3.31"
 jlogger-tracing = "0.1.4"
 tokio = { version = "1.45.1", features = ["full"] }
