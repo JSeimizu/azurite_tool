@@ -13,6 +13,7 @@ name = "azurite_tool"
 azure_core = { version = "0.24.0", features = ["reqwest", "tokio"] }
 azure_storage = "0.21.0"
 azure_storage_blobs = "0.21.0"
+bytes = "1.10.1"
 clap = { version = "4.5.39", features = ["derive"] }
 error-stack = "0.5.0"
 futures = "0.3.31"

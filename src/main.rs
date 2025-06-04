@@ -19,11 +19,23 @@ pub struct Cli {
 
     /// create a new container
     #[arg(long)]
-    create_container: Option<String>,
+    create_container: bool,
 
     /// delete a container
     #[arg(long)]
-    delete_container: Option<String>,
+    delete_container: bool,
+
+    /// Container name
+    #[arg(short, long, default_value_t=String::from("default"))]
+    container_name: String,
+
+    /// list blobs
+    #[arg(long)]
+    list_blobs: bool,
+
+    /// put blob
+    #[arg(short, long)]
+    put_blob: Option<String>,
 
     /// Verbose
     #[arg(short, long, action=clap::ArgAction::Count)]
@@ -55,13 +67,44 @@ fn main() -> Result<(), AzuriteStorageError> {
     jdebug!(func = "main", line = line!(), note = "start");
     let azurite_storage = AzuriteStorage::new(&cli.azurite_url)?;
 
-    if let Some(container_name) = cli.create_container {
-        azurite_storage.create_container(&container_name)?;
+    if cli.create_container {
+        azurite_storage.create_container(&cli.container_name)?;
         std::process::exit(0);
     }
 
-    if let Some(container_name) = cli.delete_container {
-        azurite_storage.delete_container(&container_name)?;
+    if cli.delete_container {
+        azurite_storage.delete_container(&cli.container_name)?;
+        std::process::exit(0);
+    }
+
+    if cli.list_blobs {
+        let blobs = azurite_storage.list_blobs(&cli.container_name)?;
+        if blobs.is_empty() {
+            jinfo!(
+                note = "No blobs found in container",
+                container = cli.container_name
+            );
+        } else {
+            for (i, blob) in blobs.iter().enumerate() {
+                jinfo!(
+                    No = i + 1,
+                    blob = blob.name,
+                    version = blob.version_id.as_deref().unwrap_or("N/A"),
+                    content_type = blob.properties.content_type,
+                    etag = blob.properties.etag.to_string(),
+                );
+            }
+        }
+        std::process::exit(0);
+    }
+
+    if let Some(file_path) = cli.put_blob {
+        azurite_storage.push_blob(&cli.container_name, &file_path)?;
+        jinfo!(
+            note = "File uploaded successfully",
+            file = file_path,
+            container = cli.container_name
+        );
         std::process::exit(0);
     }
 

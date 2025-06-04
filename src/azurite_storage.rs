@@ -1,8 +1,13 @@
+use std::io::Read;
 #[allow(unused)]
 use {
     super::error::AzuriteStorageError,
     azure_storage::{CloudLocation, StorageCredentials},
-    azure_storage_blobs::{prelude::*, service::operations::ListContainersResponse},
+    azure_storage_blobs::{
+        container::operations::list_blobs::BlobItem, prelude::*,
+        service::operations::ListContainersResponse,
+    },
+    bytes::Bytes,
     clap::Parser,
     error_stack::{Context, Report, Result, ResultExt},
     futures::stream::{self, StreamExt},
@@ -44,15 +49,12 @@ impl AzuriteStorage {
                     azurite_url.to_owned(),
                 ))
             })?;
-
         let client_builder =
             ClientBuilder::with_location(CloudLocation::Emulator { address, port }, credential);
 
-        let blob_service_client = client_builder.blob_service_client();
-
         Ok(AzuriteStorage {
             runtime,
-            blob_service_client,
+            blob_service_client: client_builder.blob_service_client(),
         })
     }
 
@@ -120,6 +122,63 @@ impl AzuriteStorage {
                 })?
                 .path()
                 .to_owned())
+        })
+    }
+
+    pub fn push_blob(
+        &self,
+        container_name: &str,
+        file_path: &str,
+    ) -> Result<(), AzuriteStorageError> {
+        let file = std::fs::File::open(file_path).map_err(|e| {
+            AzuriteStorageError::InternalError(format!("Failed to open file: {}", e))
+        })?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).map_err(|e| {
+            AzuriteStorageError::InternalError(format!("Failed to read file: {}", e))
+        })?;
+
+        let blob_client = self
+            .blob_service_client
+            .container_client(container_name)
+            .blob_client(file_path);
+
+        self.runtime.block_on(async {
+            blob_client
+                .put_block_blob(Bytes::from(buf))
+                .await
+                .map_err(|e| {
+                    Report::new(AzuriteStorageError::InternalError(format!(
+                        "Failed to upload file to container '{}': {}",
+                        container_name, e
+                    )))
+                })
+        })?;
+
+        Ok(())
+    }
+
+    pub fn list_blobs(&self, container_name: &str) -> Result<Vec<Blob>, AzuriteStorageError> {
+        self.runtime.block_on(async {
+            let mut result = Vec::new();
+            let mut stream = self
+                .blob_service_client
+                .container_client(container_name)
+                .list_blobs()
+                .into_stream();
+
+            while let Some(Ok(response)) = stream.next().await {
+                for blob in response.blobs.items.iter() {
+                    if let BlobItem::Blob(blob_item) = blob {
+                        result.push(blob_item.clone());
+                    } else {
+                        jdebug!("Skipping non-blob item in list: {:?}", blob);
+                    }
+                }
+            }
+
+            Ok(result)
         })
     }
 }
